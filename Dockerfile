@@ -1,68 +1,63 @@
-# Install dependencies only when needed
-FROM node:22-alpine AS deps
-# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
-RUN apk add --no-cache libc6-compat
-WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-RUN npm install -g pnpm
-RUN pnpm install --frozen-lockfile
-
-# Rebuild the source code only when needed
+# 构建阶段
 FROM node:22-alpine AS builder
+
+# 设置工作目录
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+
+# 启用 Corepack 以使用 yarn
+RUN corepack enable && corepack prepare yarn@stable --activate
+
+# 设置 npm 镜像源
+RUN npm config set registry https://mirrors.tencent.com/npm/
+
+# 复制项目文件（包括 package.json）
 COPY . .
 
-ARG DATABASE_TYPE
-ARG BASE_PATH
+# 设置 Yarn 使用腾讯云镜像源，并允许不安全的 HTTP 请求
+RUN yarn config set npmRegistryServer https://mirrors.tencent.com/npm/ && \
+    yarn config set unsafeHttpWhitelist mirrors.tencent.com && \
+    yarn config set httpTimeout 60000 && \
+    yarn config set networkConcurrency 8
 
-ENV DATABASE_TYPE=$DATABASE_TYPE
-ENV BASE_PATH=$BASE_PATH
+# 安装依赖（降低并发以减少内存使用）
+RUN yarn install --inline-builds
 
-ENV NEXT_TELEMETRY_DISABLED=1
+# 构建应用
+RUN yarn build
 
-RUN npm run build-docker
-
-# Production image, copy all the files and run next
+# 生产阶段
 FROM node:22-alpine AS runner
+
+# 设置工作目录
 WORKDIR /app
 
-ARG NODE_OPTIONS
-
+# 设置环境变量
 ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV NODE_OPTIONS=$NODE_OPTIONS
-
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-RUN npm install -g pnpm
-
-RUN set -x \
-    && apk add --no-cache curl
-
-# Script dependencies
-RUN pnpm add npm-run-all dotenv prisma@6.7.0
-
-# Permissions for prisma
-RUN chown -R nextjs:nodejs node_modules/.pnpm/
-
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/scripts ./scripts
-
-# Automatically leverage output traces to reduce image size
-# https://nextjs.org/docs/advanced-features/output-file-tracing
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-# Custom routes
-RUN mv ./.next/routes-manifest.json ./.next/routes-manifest-orig.json
-
-USER nextjs
-
-EXPOSE 3000
-
-ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 
-CMD ["pnpm", "start-docker"]
+# 启用 Corepack 以使用 yarn
+RUN corepack enable && corepack prepare yarn@stable --activate
+
+# 创建 umami 用户和组（使用较高的 UID 避免与宿主机用户冲突）
+RUN addgroup --system --gid 10001 umami && \
+    adduser --system --uid 10001 --ingroup umami umami
+
+# 复制必要的文件
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/.env ./
+COPY --from=builder /app/next.config.mjs ./
+COPY --from=builder /app/public ./public
+
+# 复制构建产物
+COPY --from=builder --chown=umami:umami /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+
+# 切换到 umami 用户
+USER umami
+
+# 暴露端口
+EXPOSE 3000
+
+# 启动应用
+CMD ["yarn", "start"]
+    
