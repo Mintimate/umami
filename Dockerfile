@@ -50,6 +50,7 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/.env ./
 COPY --from=builder /app/next.config.mjs ./
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/geo ./geo
 
 # 复制构建产物
 COPY --from=builder --chown=umami:umami /app/.next ./.next
