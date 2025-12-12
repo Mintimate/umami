@@ -13,14 +13,17 @@ RUN npm config set registry https://mirrors.tencent.com/npm/
 # 复制项目文件（包括 package.json）
 COPY . .
 
-# 设置 Yarn 使用腾讯云镜像源，并允许不安全的 HTTP 请求
+# 设置 Yarn 使用腾讯云镜像源，并降低并发减少内存使用
 RUN yarn config set npmRegistryServer https://mirrors.tencent.com/npm/ && \
     yarn config set unsafeHttpWhitelist mirrors.tencent.com && \
-    yarn config set httpTimeout 60000 && \
-    yarn config set networkConcurrency 8
+    yarn config set httpTimeout 120000 && \
+    yarn config set networkConcurrency 2
 
-# 安装依赖（降低并发以减少内存使用）
-RUN yarn install --inline-builds
+# 设置 Node.js 内存限制，降低并发以减少内存使用
+ENV NODE_OPTIONS="--max-old-space-size=2048"
+
+# 安装依赖（使用 --mode=skip-build 跳过 postinstall 脚本中的编译，减少内存占用）
+RUN yarn install --mode=skip-build
 
 # 构建应用
 RUN yarn build
