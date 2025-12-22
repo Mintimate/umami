@@ -94,6 +94,20 @@ export async function getLocation(ip: string = '', headers: Headers, hasPayloadI
   }
 
   if (!hasPayloadIP && !process.env.SKIP_LOCATION_HEADERS) {
+    // Tencent EdgeOne headers
+    if (headers.get('eo-ipcountry')) {
+      const country = decodeHeader(headers.get('eo-ipcountry'));
+      const region = decodeHeader(headers.get('eo-region-code'));
+      const city = decodeHeader(headers.get('eo-ipcity'));
+
+      return {
+        country,
+        region: getRegionCode(country, region),
+        city,
+      };
+    }
+
+
     // Cloudflare headers
     if (headers.get('cf-ipcountry')) {
       const country = decodeHeader(headers.get('cf-ipcountry'));
